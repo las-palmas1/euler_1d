@@ -1,6 +1,7 @@
 import typing
 import numpy as np
 import godunov as gd
+import log
 
 # Будет два типа задач:
 # 1 - c г.у. inlet-outlet
@@ -47,13 +48,15 @@ class SolverData:
         self.ls = np.zeros(3, self.num_sum)
         # Потоки через грани действительных ячеек, i-й элемент - поток для левой грани i-ой ячейки
         self.flux = np.zeros(3, self.num_sum)
+        # Источниковые члены
+        self.source_term = np.zeros(3, self.num_sum)
 
 
 class BoundCond:
     def __init__(self):
         # Куда накладывать г.у.
         self.i_bc = None
-        # Направление вовнутрь блока, num_bc + dom_vec - индекс крайней точки, лежащей внутри блока. Равен 1 или -1.
+        # Направление вовнутрь блока, num_bc + ins_vec - индекс крайней точки, лежащей внутри блока. Равен 1 или -1.
         self.ins_vec = None
         # Число мнимых ячеек
         self.num_dum = None
@@ -168,9 +171,11 @@ class Quasi1DBlock:
         self.area_face = None
         self.x_c = None
         self.area_c = None
+        self.dx = None
 
     def init_mesh(self):
         dx = (self.x2 - self.x1) / self.num_real
+        self.dx = dx
         # грани действительных ячеек, i-я грань - левая грань i-ой ячейки
         self.x_face = np.zeros(self.num_sum)
         # центры всех ячеек
@@ -220,8 +225,12 @@ class SolverQuasi1D:
             time_scheme='Explicit Euler',
             time_stepping='Global',
             conv=1e-5,
-            max_iter=500,
-            **kwargs):
+            ts_num=500,
+            log_file='log.txt',
+            log_console=True,
+            log_level='info',
+            **kwargs
+    ):
         self.mesh = mesh
         self.rho_ini = rho_ini
         self.u_ini = u_ini
@@ -230,10 +239,20 @@ class SolverQuasi1D:
         self.space_scheme = space_scheme
         self.time_scheme = time_scheme
         self.conv = conv
-        self.max_iter = max_iter
+        self.ts_num = ts_num
         self._kwargs = kwargs
-        if time_stepping == 'Global'and 'ts' not in kwargs:
-            raise Exception('"ts" value must be set in the case of global time stepping.')
+        self.time_stepping = time_stepping
+        # Невязка
+        self.res = np.zeros(ts_num)
+        # Нормированная невязка
+        self.res_norm = np.zeros(ts_num)
+        self.logger = log.Logger(log_level, log_file, log_console)
+        if time_stepping == 'Global'and 'dt' not in kwargs:
+            raise Exception('"dt" value must be set in the case of global time stepping.')
+        if time_stepping == 'Global':
+            self.dt = self._kwargs['dt']
+            self.time = 0
+            self.data.dt = self._kwargs['dt']
 
     @classmethod
     def _check_bc(cls, bc1: BoundCond, bc2: BoundCond):
@@ -258,7 +277,7 @@ class SolverQuasi1D:
         e_ini_arr = p_ini_arr / (rho_ini_arr * (self.data.k - 1))
         self.data.cv[2, :] = self.mesh.area_c * self.rho_ini * (e_ini_arr + 0.5 * u_ini_arr**2)
 
-    def compute_rl_state(self):
+    def _compute_rl_state(self):
         if self.space_scheme == 'Godunov':
             for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
                 self.data.rs[0, i] = self.data.cv[0, i] / self.data.area_c[i]
@@ -268,9 +287,71 @@ class SolverQuasi1D:
                 self.data.ls[1, i] = self.data.cv[1, i - 1] / self.data.cv[0, i - 1]
                 self.data.ls[2, i] = self.data.p[i]
 
-    def compute_flux(self):
+    def _compute_flux(self):
         if self.space_scheme == 'Godunov':
-            pass
+            for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
+                godunov_solver = gd.GodunovRiemannSolver(
+                    rho_l=self.data.ls[0, i], u_l=self.data.ls[1, i], p_l=self.data.ls[2, i],
+                    rho_r=self.data.rs[0, i], u_r=self.data.rs[1, i], p_r=self.data.rs[2, i],
+                    p_star_init_type='PV', k=self.data.k
+                )
+                godunov_solver.compute_star()
+                rho, u, p = godunov_solver.get_point(0, self.data.dt[i])
+                self.data.flux[0, i] = self.mesh.area_face[i] * rho * u
+                self.data.flux[1, i] = self.mesh.area_face[i] * (rho * u * u + p)
+                e = 0.5 * u**2 + p / ((self.data.k - 1) * rho)
+                self.data.flux[2, i] = self.mesh.area_face[i] * u * (rho * e + p)
+
+    def _compute_source_term(self):
+        for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real):
+            da = 0.5 * (self.mesh.area_c[i + 1] - self.mesh.area_c[i - 1])
+            self.data.source_term[0, i] = 0
+            self.data.source_term[1, i] = da * self.data.p[i]
+            self.data.source_term[2, i] = 0
+
+    def _compute_res(self):
+        # Невязка вычисляется следующим образом:
+        # R = F_{i+1/2} - F_{i-1/2} - S_i
+        self.data.res[:, self.mesh.i_start: self.mesh.i_start + self.mesh.num_real] = (
+            self.data.flux[:, self.mesh.i_start + 1: self.mesh.i_start + self.mesh.num_real + 1] -
+            self.data.flux[:, self.mesh.i_start: self.mesh.i_start + self.mesh.num_real]
+        ) - self.data.source_term[:, self.mesh.i_start: self.mesh.i_start + self.mesh.num_real]
+
+    def solve(self):
+        # Сходимость проверяется по норме изменения вектора плотности.
+        # Величиная невязок на каждом шаге по времени относится к величине невязки на первом шаге.
+        self.logger.info('Initializing flow')
+        self.init_flow()
+        self.mesh.bc1.impose(self.data)
+        self.mesh.bc2.impose(self.data)
+        if self.time_stepping == 'Global':
+            if self.time_scheme == 'Explicit Euler':
+                # Для явной схемы Эйлера 1-го порядка значения на следующем временном уровне:
+                # U^{i+1} = U^{i} - dt / dx * R
+                self.logger.info('Start time iterating')
+                for i in range(self.ts_num):
+                    self.logger.info('Time step %s' % i)
+                    self.data.cv_old = self.data.cv
+                    self.time = self.time + (i + 1) * self.dt
+                    self._compute_rl_state()
+                    self._compute_flux()
+                    self._compute_source_term()
+                    self._compute_res()
+                    self.data.cv = self.data.cv_old - self.dt / self.mesh.dx * self.data.res
+                    u = self.data.cv[1, :] / self.data.cv[0, :]
+                    rho = self.data.cv[0, :] / self.mesh.area_c
+                    e = self.data.cv[2, :] / (self.mesh.area_c * rho) - 0.5 * u**2
+                    self.data.p = e * (self.data.k - 1) * rho
+                    self.mesh.bc1.impose(self.data)
+                    self.mesh.bc2.impose(self.data)
+                    rho_old = self.data.cv_old[0, :] / self.mesh.area_c
+                    drho2 = (rho - rho_old)**2
+                    self.res[i] = np.sqrt(np.sum(drho2))
+                    self.res_norm[i] = self.res[i] / self.res[0]
+                    self.logger.info('Res_rho = %.4f' % self.res[i])
+                    self.logger.info('Res_rho_norm = %.4f' % self.res_norm[i])
+
+
 
 
 
