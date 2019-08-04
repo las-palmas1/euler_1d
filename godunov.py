@@ -113,8 +113,8 @@ class GodunovRiemannSolver:
 
     def compute_star(self):
         self.compute_p_star_init()
-        self.p_star = newton(self.f, self.p_star_init, fprime=self.f_d, tol=self.tol)
-        # self.p_star = fsolve(lambda x: [self.f(x[0])], np.array([self.p_star_guess]), xtol=self.tol)[0]
+        # self.p_star = newton(self.f, self.p_star_init, fprime=self.f_d, tol=self.tol)
+        self.p_star = fsolve(lambda x: [self.f(x[0])], np.array([self.p_star_init]), xtol=self.tol)[0]
         self.u_star = 0.5 * (self.u_l + self.u_r) + 0.5 * (self.f_right(self.p_star) - self.f_left(self.p_star))
         self._set_solution_type()
         if self._sol_type == SolutionType.BOTH_SHOCK:
