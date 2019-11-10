@@ -3,7 +3,6 @@ import numpy as np
 import godunov as gd
 import log
 import gdf
-import matplotlib.pyplot as plt
 
 # Будет два типа задач:
 # 1 - c г.у. inlet-outlet
@@ -20,6 +19,13 @@ import matplotlib.pyplot as plt
 #
 # |-------- l-state for i-th face --------------|           |-------- r-state for i-th face --------------|
 # |--------------- (i-1)-th cell ---------------| i-th face |----------------- i-th cell -----------------|
+
+# Vector of conservative variables:
+#       rho * A
+# cv =  u * rho * A
+#       rho * (e + 0.5 * u^2) * A
+
+# where specific internal energy e = p / (rho * (k - 1))
 
 
 class SolverData:
@@ -44,9 +50,9 @@ class SolverData:
         # Скорость звука
         self.a = np.zeros(self.num_sum)
         # Шаг по времени
-        self.dt = np.zeros(self.num_sum)
+        self.dt = 0.
         # Текущее время
-        self.time = np.zeros(self.num_sum)
+        self.time = 0.
         # Значения слева и справа от граней действительных ячеек, i-й элемент - состояния для левой грани i-й ячейки
         self.rs = np.zeros((3, self.num_sum))
         self.ls = np.zeros((3, self.num_sum))
@@ -335,13 +341,12 @@ class SolverQuasi1D:
             raise Exception('"cfl" must be set in case of local time stepping')
 
         if time_stepping == 'Global':
-            self.dt = self._kwargs['dt']
-            self.time = 0
-            self.data.dt = np.full(self.mesh.num_sum, self._kwargs['dt'])
+            self.data.time = 0
+            self.data.dt = self._kwargs['dt']
         if time_stepping == 'Local':
             self.clf = kwargs['cfl']
-            self.time = 0
-            self.dt = None
+            self.data.time = 0
+            self.data.dt = None
 
     @classmethod
     def _check_bc(cls, bc1: BoundCond, bc2: BoundCond):
@@ -378,6 +383,7 @@ class SolverQuasi1D:
     def _compute_rl_state(self):
         if self.space_scheme == 'Godunov' or self.space_scheme == 'van Leer':
             for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
+                # Variables for left and right states: (rho u p)
                 self.data.rs[0, i] = self.data.cv[0, i] / self.data.area_c[i]
                 self.data.rs[1, i] = self.data.cv[1, i] / self.data.cv[0, i]
                 self.data.rs[2, i] = self.data.p[i]
@@ -396,7 +402,7 @@ class SolverQuasi1D:
                     p_star_init_type='PV', k=self.data.k
                 )
                 godunov_solver.compute_star()
-                rho, u, p = godunov_solver.get_point(0, self.data.dt[i])
+                rho, u, p = godunov_solver.get_point(0, self.data.dt)
                 self.data.flux[0, i] = self.mesh.area_face[i] * rho * u
                 self.data.flux[1, i] = self.mesh.area_face[i] * (rho * u * u + p)
                 e = 0.5 * u**2 + p / ((self.data.k - 1) * rho)
@@ -464,17 +470,16 @@ class SolverQuasi1D:
                     if self.time_stepping == 'Local':
                         u = self.data.cv[1, :] / self.data.cv[0, :]
                         s_max = np.max(np.abs(u) + self.data.a)
-                        self.dt = self.clf * self.mesh.dx / s_max
-                        self.data.dt = np.full(self.mesh.num_sum, self.dt)
-                    self.time = self.time + self.dt
-                    self.logger.info('Time = %s' % self.time)
+                        self.data.dt = self.clf * self.mesh.dx / s_max
+                    self.data.time = self.data.time + self.data.dt
+                    self.logger.info('Time = %s' % self.data.time)
 
                     self._compute_rl_state()
                     self._compute_flux()
                     self._compute_source_term()
                     self._compute_res()
 
-                    self.data.cv = self.data.cv_old - self.dt / self.mesh.dx * self.data.res
+                    self.data.cv = self.data.cv_old - self.data.dt / self.mesh.dx * self.data.res
                     u = self.data.cv[1, :] / self.data.cv[0, :]
                     rho = self.data.cv[0, :] / self.mesh.area_c
                     e = self.data.cv[2, :] / (self.mesh.area_c * rho) - 0.5 * u**2
@@ -489,7 +494,7 @@ class SolverQuasi1D:
                     self.res[i] = np.sqrt(np.sum(drho2))
                     self.res_norm[i] = self.res[i] / self.res[0]
                     self.logger.info('Res_rho = %.4f' % self.res[i])
-                    self.logger.info('Res_rho_norm = %.4f' % self.res_norm[i])
+                    self.logger.info('Res_rho_norm = %.4f\n' % self.res_norm[i])
                 except Exception as ex:
                     self.logger.info('ERROR: ' + str(ex))
                     break

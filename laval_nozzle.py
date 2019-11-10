@@ -128,6 +128,7 @@ class LavalNozzleSolver:
 
         host: matplotlib.axes.Axes = subplots[1]
         fig.subplots_adjust(right=0.68)
+
         par1: matplotlib.axes.Axes = host.twinx()
         par2: matplotlib.axes.Axes = host.twinx()
         par3: matplotlib.axes.Axes = host.twinx()
@@ -138,8 +139,8 @@ class LavalNozzleSolver:
         par3.spines["right"].set_position(("axes", 1.4))
         # Having been created by twinx, par2 has its frame off, so the line of its
         # detached spine is invisible.  First, activate the frame but make the patch
-        # and spines invisible.
         self.make_patch_spines_invisible(par2)
+        # and spines invisible.
         self.make_patch_spines_invisible(par3)
         # Second, show the right spine.
         par2.spines["right"].set_visible(True)
