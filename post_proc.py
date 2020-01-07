@@ -95,7 +95,7 @@ def plot_vars_jointly(
         title = 'time = %.3f' % solver_data.time
 
     for axis, var_settings in zip(axes, vars_settings):
-        x_ref, y_ref = ref_vars_distrs[Variable.u]
+        x_ref, y_ref = ref_vars_distrs[var_settings.var]
 
         if var_settings.var == Variable.u:
             y_solv = u_solv
@@ -120,7 +120,7 @@ def plot_vars_jointly(
         )
         axis.plot(x_ref, y_ref, lw=ref_lw, ls=ref_ls, color=var_settings.color)
 
-        axis.set_ylabel(var_settings.axis_label, colors=l1.get_color(), fontsize=label_fontszie)
+        axis.set_ylabel(var_settings.axis_label, color=l1.get_color(), fontsize=label_fontszie)
         axis.yaxis.label.set_color(var_settings.color)
         axis.tick_params(axis='y', colors=var_settings.color, **tkw)
 

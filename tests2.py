@@ -101,7 +101,7 @@ class LavalNozzleSolverTests(unittest.TestCase):
         solver = LavalNozzleSolver(
             T_stag=1000,
             p1_stag=500e3,
-            p2=400e3,
+            p2=350e3,
             x1=self.x1,
             x2=self.x2,
             area=self.area,
@@ -302,5 +302,3 @@ class RiemannProblemTest(unittest.TestCase):
         plot_rel(solver.data, solver.mesh)
 
 
-# TODO: сделать параметризованный тест на задачу Римана и на сопло Лаваля
-#  написать функции для визуализации последнего шага по времени в сравнении с точным результатом
