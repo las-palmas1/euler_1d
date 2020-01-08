@@ -10,6 +10,8 @@ import gdf
 import os
 
 
+# TODO: сделать сохранение данных на каждом шаге и запись по ним анимации
+
 class Variable(Enum):
     u = 0
     p = 1

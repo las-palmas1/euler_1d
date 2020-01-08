@@ -277,7 +277,7 @@ class RiemannProblemTest(unittest.TestCase):
         self.num_real = 100
         self.num_dum = 1
         self.dt = 1e-3
-        self.ts_num = 50
+        self.ts_num = 100
 
         self.T_ini = lambda x: self.T_l if x <= self.x0 else self.T_r
         self.p_ini = lambda x: self.p_l if x <= self.x0 else self.p_r
@@ -294,7 +294,7 @@ class RiemannProblemTest(unittest.TestCase):
         solver = SolverQuasi1D(
             mesh=mesh, k=self.k, R=self.R,
             T_ini=self.T_ini, u_ini=self.u_ini, p_ini=self.p_ini,
-            space_scheme='Godunov', time_scheme='Explicit Euler',
+            space_scheme='Steger-Warming', time_scheme='Explicit Euler',
             time_stepping='Local', ts_num=self.ts_num, log_file='', log_console=True,
             log_level='info', cfl=0.5
         )

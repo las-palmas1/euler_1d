@@ -46,7 +46,7 @@ class TestRiemannProblem:
         self.x1 = 0
         self.x2 = 1
         self.cfl = 0.5
-        self.ts_num = 100
+        self.ts_num = 150
         self.num_real = 100
         self.num_dum = 1
         self.num_pnt_exact = 500
@@ -112,6 +112,52 @@ class TestRiemannProblem:
             },
             figsize=self.figsize, show=False, fname=os.path.join(plots_dirname, self.fname_pref + 'godunov-%s' % name),
             title='Godunov'
+        )
+
+    def test_steger_warming(self, rho_l, u_l, p_l, rho_r, u_r, p_r, x0_rel, name):
+        x0 = self.x1 + (self.x2 - self.x1) * x0_rel
+
+        T_l = p_l / (self.R * rho_l)
+        T_r = p_r / (self.R * rho_r)
+
+        T_ini = lambda x: T_l if x <= x0 else T_r
+        p_ini = lambda x: p_l if x <= x0 else p_r
+        u_ini = lambda x: u_l if x <= x0 else u_r
+
+        num_solver = solver.SolverQuasi1D(
+            mesh=self.mesh, k=self.k, R=self.R, T_ini=T_ini, u_ini=u_ini, p_ini=p_ini,
+            space_scheme='Steger-Warming', time_scheme=self.time_scheme, time_stepping=self.time_stepping,
+            ts_num=self.ts_num, log_file=os.path.join(log_dirname, self.fname_pref + 'steg-warm-%s.log' % name),
+            log_console=True, log_level=self.log_level, cfl=self.cfl
+        )
+        num_solver.solve()
+
+        sol_time = num_solver.data.time
+
+        x_exact = np.linspace(self.x1, self.x2, self.num_pnt_exact)
+        exact_solver = GodunovRiemannSolver(rho_l, u_l, p_l, rho_r, u_r, p_r, p_star_init_type='PV', k=self.k)
+        exact_solver.compute_star()
+
+        rho_exact = np.zeros(self.num_pnt_exact)
+        u_exact = np.zeros(self.num_pnt_exact)
+        p_exact = np.zeros(self.num_pnt_exact)
+        for n, x in enumerate(x_exact):
+            solution = exact_solver.get_point(x - x0, sol_time)
+            rho_exact[n] = solution[0]
+            u_exact[n] = solution[1]
+            p_exact[n] = solution[2]
+        e_exact = p_exact / (rho_exact * (self.k - 1))
+
+        plot_vars_separately(
+            solver_data=num_solver.data, mesh=self.mesh,
+            vars_settings=[self.rho_set, self.u_set, self.p_set, self.e_set],
+            ref_vars_distrs={
+                Variable.rho: (x_exact, rho_exact), Variable.u: (x_exact, u_exact), Variable.p: (x_exact, p_exact),
+                Variable.e: (x_exact, e_exact)
+            },
+            figsize=self.figsize, show=False,
+            fname=os.path.join(plots_dirname, self.fname_pref + 'steg-warm-%s' % name),
+            title='Steger-Warming'
         )
 
 
@@ -192,6 +238,49 @@ class TestLavalNozzle:
             },
             figsize=self.figsize, show=False, fname=os.path.join(plots_dirname, self.fname_pref + 'godunov-%s' % name),
             title='Godunov', sol_markevery=4
+        )
+
+    def test_steger_warming(self, p2, name):
+        T = self.T_stag * (p2 / self.p1_stag) ** ((self.k - 1) / self.k)
+        Mach = ((self.T_stag / T - 1) * 2 / (self.k - 1)) ** 0.5
+        a = (self.k * self.R * T) ** 0.5
+
+        T_ini = lambda x: T
+        u_ini = lambda x: a * Mach
+        p_ini = lambda x: p2
+
+        outlet = solver.PressureOutlet(p=p2)
+        mesh = solver.Quasi1DBlock(
+            area=self.area, x1=self.x1, x2=self.x2, bc1=self.inlet, bc2=outlet,
+            num_real=self.num_real, num_dum=self.num_dum
+        )
+        num_solver = solver.SolverQuasi1D(
+            mesh=mesh, k=self.k, R=self.R,
+            T_ini=T_ini, u_ini=u_ini, p_ini=p_ini,
+            space_scheme='Steger-Warming', time_scheme=self.time_scheme,
+            time_stepping=self.time_stepping, ts_num=self.ts_num,
+            log_file=os.path.join(log_dirname, self.fname_pref + 'steg-warm-%s.log' % name), log_console=True,
+            log_level=self.log_level, cfl=self.cfl
+        )
+        num_solver.solve()
+
+        exact_solver = LavalNozzleSolver(
+            T_stag=self.T_stag, p1_stag=self.p1_stag, p2=p2, area=self.area, x1=self.x1, x2=self.x2, k=self.k,
+            R=self.R, num=self.num_exact, lam_pre_init=self.lam_pre_init
+        )
+        exact_solver.compute()
+
+        plot_vars_jointly(
+            solver_data=num_solver.data, mesh=mesh,
+            vars_settings=[self.lam_set, self.T_set, self.p_set],
+            ref_vars_distrs={
+                Variable.lam: (exact_solver.x_arr, exact_solver.lam_arr),
+                Variable.T: (exact_solver.x_arr, exact_solver.T_arr),
+                Variable.p: (exact_solver.x_arr, exact_solver.p_arr),
+            },
+            figsize=self.figsize, show=False,
+            fname=os.path.join(plots_dirname, self.fname_pref + 'steg-warm-%s' % name),
+            title='Steger-Warming', sol_markevery=4
         )
 
 

@@ -24,6 +24,11 @@ import gdf
 # cv =  u * rho * A
 #       rho * (e + 0.5 * u^2) * A
 
+# Flux vector:
+#       rho * u * A
+# F  =  (u * u * rho + p) * A
+#       (rho * (e + 0.5 * u^2) + p) * u * A
+
 # where specific internal energy e = p / (rho * (k - 1))
 
 
@@ -380,7 +385,7 @@ class SolverQuasi1D:
         self.data.cv[2, :] = self.mesh.area_c * rho_ini_arr * (e_ini_arr + 0.5 * u_ini_arr ** 2)
 
     def _compute_rl_state(self):
-        if self.space_scheme == 'Godunov' or self.space_scheme == 'van Leer':
+        if self.space_scheme == 'Godunov' or self.space_scheme == 'van Leer' or self.space_scheme == 'Steger-Warming':
             for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
                 # Variables for left and right states: (rho u p)
                 self.data.rs[0, i] = self.data.cv[0, i] / self.data.area_c[i]
@@ -407,8 +412,8 @@ class SolverQuasi1D:
                 e = 0.5 * u**2 + p / ((self.data.k - 1) * rho)
                 self.data.flux[2, i] = self.mesh.area_face[i] * u * (rho * e + p)
 
+        # for flux vector splitting schemes - F_{i+1/2} = F^{+}_{U_l} + F^{-}_{U_r}
         if self.space_scheme == 'van Leer':
-            # for flux vector splitting schemes - F_{i+1/2} = F^{+}_{U_l} + F^{-}_{U_r}
             for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
                 self.logger.debug('Cell i = %s' % i)
                 a_l = (self.data.ls[2, i] * self.data.k / self.data.ls[0, i]) ** 0.5
@@ -425,6 +430,54 @@ class SolverQuasi1D:
                 f_m0 = -0.25 * rho_r * a_r * (1 - M_r) ** 2
                 f_m1 = f_m0 * 2 * a_r / self.data.k * ((self.data.k - 1) / 2 * M_r - 1)
                 f_m2 = f_m0 * 2 * a_r ** 2 / (self.data.k ** 2 - 1) * ((self.data.k - 1) / 2 * M_r - 1) ** 2
+
+                self.data.flux[0, i] = (f_p0 + f_m0) * self.mesh.area_face[i]
+                self.data.flux[1, i] = (f_p1 + f_m1) * self.mesh.area_face[i]
+                self.data.flux[2, i] = (f_p2 + f_m2) * self.mesh.area_face[i]
+
+        if self.space_scheme == 'Steger-Warming':
+            for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
+                self.logger.debug('Cell i = %s' % i)
+                a_l = (self.data.ls[2, i] * self.data.k / self.data.ls[0, i]) ** 0.5
+                a_r = (self.data.rs[2, i] * self.data.k / self.data.rs[0, i]) ** 0.5
+                rho_l = self.data.ls[0, i]
+                rho_r = self.data.rs[0, i]
+                u_l = self.data.ls[1, i]
+                u_r = self.data.rs[1, i]
+                H_l = 0.5 * u_l**2 + a_l**2 / (self.data.k - 1)
+                H_r = 0.5 * u_r**2 + a_r**2 / (self.data.k - 1)
+
+                lam0_l = u_l - a_l
+                lam1_l = u_l
+                lam2_l = u_l + a_l
+
+                lam0_r = u_r - a_r
+                lam1_r = u_r
+                lam2_r = u_r + a_r
+
+                lam_p0 = 0.5 * (lam0_l + abs(lam0_l))
+                lam_p1 = 0.5 * (lam1_l + abs(lam1_l))
+                lam_p2 = 0.5 * (lam2_l + abs(lam2_l))
+
+                lam_m0 = 0.5 * (lam0_r - abs(lam0_r))
+                lam_m1 = 0.5 * (lam1_r - abs(lam1_r))
+                lam_m2 = 0.5 * (lam2_r - abs(lam2_r))
+
+                f_p0 = rho_l / (2 * self.data.k) * (lam_p0 + 2 * (self.data.k - 1) * lam_p1 + lam_p2)
+                f_p1 = rho_l / (2 * self.data.k) * (
+                    (u_l - a_l) * lam_p0 + 2 * (self.data.k - 1) * u_l * lam_p1 + (u_l + a_l) * lam_p2
+                )
+                f_p2 = rho_l / (2 * self.data.k) * (
+                    (H_l - u_l * a_l) * lam_p0 + (self.data.k - 1) * u_l**2 * lam_p1 + (H_l + u_l * a_l) * lam_p2
+                )
+
+                f_m0 = rho_r / (2 * self.data.k) * (lam_m0 + 2 * (self.data.k - 1) * lam_m1 + lam_m2)
+                f_m1 = rho_r / (2 * self.data.k) * (
+                        (u_r - a_r) * lam_m0 + 2 * (self.data.k - 1) * u_r * lam_m1 + (u_r + a_r) * lam_m2
+                )
+                f_m2 = rho_r / (2 * self.data.k) * (
+                        (H_r - u_r * a_r) * lam_m0 + (self.data.k - 1) * u_r ** 2 * lam_m1 + (H_r + u_r * a_r) * lam_m2
+                )
 
                 self.data.flux[0, i] = (f_p0 + f_m0) * self.mesh.area_face[i]
                 self.data.flux[1, i] = (f_p1 + f_m1) * self.mesh.area_face[i]
@@ -447,7 +500,7 @@ class SolverQuasi1D:
 
     def solve(self):
         # Сходимость проверяется по норме изменения вектора плотности.
-        # Величиная невязок на каждом шаге по времени относится к величине невязки на первом шаге.
+        # Величина невязок на каждом шаге по времени относится к величине невязки на первом шаге.
         self.logger.info('Initializing mesh')
         self.mesh.init_mesh(self.data)
         self.mesh.init_bc()
