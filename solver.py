@@ -1,8 +1,10 @@
 import typing
 import numpy as np
-import godunov as gd
 import log
+from constant import *
 import gdf
+from dataclasses import dataclass, field
+from conv_flux import get_conv_flux
 
 # Будет два типа задач:
 # 1 - c г.у. inlet-outlet
@@ -31,16 +33,20 @@ import gdf
 
 # where specific internal energy e = p / (rho * (k - 1))
 
+# Vector of left and right states: (rho, u, p)
 
+
+@dataclass
 class SolverData:
-    def __init__(self, num_real: int, num_dum, k=1.4, R=287):
-        self.num_real = num_real
-        self.num_dum = num_dum
-        self.num_sum = num_real + 2 * num_dum
-        self.k = k
-        self.R = R
+    num_real: int = field(init=True)
+    num_dum: int = field(init=True, default=1)
+    k: float = field(init=True, default=1.4)
+    R: float = field(init=True, default=287.)
+
+    def __post_init__(self):
+        self.num_sum: int = self.num_real + 2 * self.num_dum
         # индекс первой действительной ячейки
-        self.i_start = self.num_dum
+        self.i_start: int = self.num_dum
         # площадь в центрах всех ячеек
         self.area_c = np.zeros(self.num_sum)
         # Значения консерватиных переменных в центрах ячеек на текущем временном уровне
@@ -54,9 +60,9 @@ class SolverData:
         # Скорость звука
         self.a = np.zeros(self.num_sum)
         # Шаг по времени
-        self.dt = 0.
+        self.dt: float = 0.
         # Текущее время
-        self.time = 0.
+        self.time: float = 0.
         # Значения слева и справа от граней действительных ячеек, i-й элемент - состояния для левой грани i-й ячейки
         self.rs = np.zeros((3, self.num_sum))
         self.ls = np.zeros((3, self.num_sum))
@@ -69,11 +75,11 @@ class SolverData:
 class BoundCond:
     def __init__(self):
         # Куда накладывать г.у.
-        self.i_bc = None
+        self.i_bc: int = 0
         # Направление вовнутрь блока, i_bc + ins_vec - индекс крайней точки, лежащей внутри блока. Равен 1 или -1.
-        self.ins_vec = None
+        self.ins_vec: int = 1
         # Число мнимых ячеек
-        self.num_dum = None
+        self.num_dum: int = 1
 
     def impose(self, data: SolverData):
         pass
@@ -314,9 +320,9 @@ class SolverQuasi1D:
             T_ini: typing.Callable[[float], float],
             u_ini: typing.Callable[[float], float],
             p_ini: typing.Callable[[float], float],
-            space_scheme='Godunov',
-            time_scheme='Explicit Euler',
-            time_stepping='Global',
+            space_scheme: SpaceScheme = SpaceScheme.Godunov,
+            time_scheme: TimeScheme = TimeScheme.ExplicitEuler,
+            time_stepping: TimeStepping = TimeStepping.Global,
             ts_num=500,
             log_file='log.txt',
             log_console=True,
@@ -339,15 +345,15 @@ class SolverQuasi1D:
         self.res_norm = np.zeros(ts_num)
         self.logger = log.Logger(log_level, log_file, log_console)
 
-        if time_stepping == 'Global'and 'dt' not in kwargs:
+        if time_stepping == TimeStepping.Global and 'dt' not in kwargs:
             raise Exception('"dt" value must be set in case of global time stepping.')
-        if time_stepping == 'Local' and 'cfl' not in kwargs:
+        if time_stepping == TimeStepping.Local and 'cfl' not in kwargs:
             raise Exception('"cfl" must be set in case of local time stepping')
 
-        if time_stepping == 'Global':
+        if time_stepping == TimeStepping.Global:
             self.data.time = 0
             self.data.dt = self._kwargs['dt']
-        if time_stepping == 'Local':
+        if time_stepping == TimeStepping.Local:
             self.clf = kwargs['cfl']
             self.data.time = 0
             self.data.dt = None
@@ -385,103 +391,28 @@ class SolverQuasi1D:
         self.data.cv[2, :] = self.mesh.area_c * rho_ini_arr * (e_ini_arr + 0.5 * u_ini_arr ** 2)
 
     def _compute_rl_state(self):
-        if self.space_scheme == 'Godunov' or self.space_scheme == 'van Leer' or self.space_scheme == 'Steger-Warming':
-            for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
-                # Variables for left and right states: (rho u p)
-                self.data.rs[0, i] = self.data.cv[0, i] / self.data.area_c[i]
-                self.data.rs[1, i] = self.data.cv[1, i] / self.data.cv[0, i]
-                self.data.rs[2, i] = self.data.p[i]
-                self.data.ls[0, i] = self.data.cv[0, i - 1] / self.data.area_c[i - 1]
-                self.data.ls[1, i] = self.data.cv[1, i - 1] / self.data.cv[0, i - 1]
-                self.data.ls[2, i] = self.data.p[i - 1]
+        for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
+            # Variables for left and right states: (rho u p)
+            self.data.rs[0, i] = self.data.cv[0, i] / self.data.area_c[i]
+            self.data.rs[1, i] = self.data.cv[1, i] / self.data.cv[0, i]
+            self.data.rs[2, i] = self.data.p[i]
+            self.data.ls[0, i] = self.data.cv[0, i - 1] / self.data.area_c[i - 1]
+            self.data.ls[1, i] = self.data.cv[1, i - 1] / self.data.cv[0, i - 1]
+            self.data.ls[2, i] = self.data.p[i - 1]
 
     def _compute_flux(self):
         self.logger.debug('Computing fluxes')
-        if self.space_scheme == 'Godunov':
-            for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
-                self.logger.debug('Cell i = %s' % i)
-                godunov_solver = gd.GodunovRiemannSolver(
-                    rho_l=self.data.ls[0, i], u_l=self.data.ls[1, i], p_l=self.data.ls[2, i],
-                    rho_r=self.data.rs[0, i], u_r=self.data.rs[1, i], p_r=self.data.rs[2, i],
-                    p_star_init_type='PV', k=self.data.k
-                )
-                godunov_solver.compute_star()
-                rho, u, p = godunov_solver.get_point(0, self.data.dt)
-                self.data.flux[0, i] = self.mesh.area_face[i] * rho * u
-                self.data.flux[1, i] = self.mesh.area_face[i] * (rho * u * u + p)
-                e = 0.5 * u**2 + p / ((self.data.k - 1) * rho)
-                self.data.flux[2, i] = self.mesh.area_face[i] * u * (rho * e + p)
-
         # for flux vector splitting schemes - F_{i+1/2} = F^{+}_{U_l} + F^{-}_{U_r}
-        if self.space_scheme == 'van Leer':
-            for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
-                self.logger.debug('Cell i = %s' % i)
-                a_l = (self.data.ls[2, i] * self.data.k / self.data.ls[0, i]) ** 0.5
-                a_r = (self.data.rs[2, i] * self.data.k / self.data.rs[0, i]) ** 0.5
-                rho_l = self.data.ls[0, i]
-                rho_r = self.data.rs[0, i]
-                M_l = self.data.ls[1, i] / a_l
-                M_r = self.data.rs[1, i] / a_r
 
-                f_p0 = 0.25 * rho_l * a_l * (1 + M_l)**2
-                f_p1 = f_p0 * 2 * a_l / self.data.k * ((self.data.k - 1) / 2 * M_l + 1)
-                f_p2 = f_p0 * 2 * a_l**2 / (self.data.k**2 - 1) * ((self.data.k - 1) / 2 * M_l + 1)**2
+        conv_flux = get_conv_flux(self.space_scheme)
 
-                f_m0 = -0.25 * rho_r * a_r * (1 - M_r) ** 2
-                f_m1 = f_m0 * 2 * a_r / self.data.k * ((self.data.k - 1) / 2 * M_r - 1)
-                f_m2 = f_m0 * 2 * a_r ** 2 / (self.data.k ** 2 - 1) * ((self.data.k - 1) / 2 * M_r - 1) ** 2
+        for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
+            self.logger.debug('Cell i = %s' % i)
+            f0, f1, f2 = conv_flux.compute(self.data.ls[:, i], self.data.rs[:, i], self.data.k, self.data.dt)
 
-                self.data.flux[0, i] = (f_p0 + f_m0) * self.mesh.area_face[i]
-                self.data.flux[1, i] = (f_p1 + f_m1) * self.mesh.area_face[i]
-                self.data.flux[2, i] = (f_p2 + f_m2) * self.mesh.area_face[i]
-
-        if self.space_scheme == 'Steger-Warming':
-            for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real + 1):
-                self.logger.debug('Cell i = %s' % i)
-                a_l = (self.data.ls[2, i] * self.data.k / self.data.ls[0, i]) ** 0.5
-                a_r = (self.data.rs[2, i] * self.data.k / self.data.rs[0, i]) ** 0.5
-                rho_l = self.data.ls[0, i]
-                rho_r = self.data.rs[0, i]
-                u_l = self.data.ls[1, i]
-                u_r = self.data.rs[1, i]
-                H_l = 0.5 * u_l**2 + a_l**2 / (self.data.k - 1)
-                H_r = 0.5 * u_r**2 + a_r**2 / (self.data.k - 1)
-
-                lam0_l = u_l - a_l
-                lam1_l = u_l
-                lam2_l = u_l + a_l
-
-                lam0_r = u_r - a_r
-                lam1_r = u_r
-                lam2_r = u_r + a_r
-
-                lam_p0 = 0.5 * (lam0_l + abs(lam0_l))
-                lam_p1 = 0.5 * (lam1_l + abs(lam1_l))
-                lam_p2 = 0.5 * (lam2_l + abs(lam2_l))
-
-                lam_m0 = 0.5 * (lam0_r - abs(lam0_r))
-                lam_m1 = 0.5 * (lam1_r - abs(lam1_r))
-                lam_m2 = 0.5 * (lam2_r - abs(lam2_r))
-
-                f_p0 = rho_l / (2 * self.data.k) * (lam_p0 + 2 * (self.data.k - 1) * lam_p1 + lam_p2)
-                f_p1 = rho_l / (2 * self.data.k) * (
-                    (u_l - a_l) * lam_p0 + 2 * (self.data.k - 1) * u_l * lam_p1 + (u_l + a_l) * lam_p2
-                )
-                f_p2 = rho_l / (2 * self.data.k) * (
-                    (H_l - u_l * a_l) * lam_p0 + (self.data.k - 1) * u_l**2 * lam_p1 + (H_l + u_l * a_l) * lam_p2
-                )
-
-                f_m0 = rho_r / (2 * self.data.k) * (lam_m0 + 2 * (self.data.k - 1) * lam_m1 + lam_m2)
-                f_m1 = rho_r / (2 * self.data.k) * (
-                        (u_r - a_r) * lam_m0 + 2 * (self.data.k - 1) * u_r * lam_m1 + (u_r + a_r) * lam_m2
-                )
-                f_m2 = rho_r / (2 * self.data.k) * (
-                        (H_r - u_r * a_r) * lam_m0 + (self.data.k - 1) * u_r ** 2 * lam_m1 + (H_r + u_r * a_r) * lam_m2
-                )
-
-                self.data.flux[0, i] = (f_p0 + f_m0) * self.mesh.area_face[i]
-                self.data.flux[1, i] = (f_p1 + f_m1) * self.mesh.area_face[i]
-                self.data.flux[2, i] = (f_p2 + f_m2) * self.mesh.area_face[i]
+            self.data.flux[0, i] = f0 * self.mesh.area_face[i]
+            self.data.flux[1, i] = f1 * self.mesh.area_face[i]
+            self.data.flux[2, i] = f2 * self.mesh.area_face[i]
 
     def _compute_source_term(self):
         for i in range(self.mesh.i_start, self.mesh.i_start + self.mesh.num_real):
@@ -508,7 +439,7 @@ class SolverQuasi1D:
         self.init_flow()
         self.mesh.bc1.impose(self.data)
         self.mesh.bc2.impose(self.data)
-        if self.time_scheme == 'Explicit Euler':
+        if self.time_scheme == TimeScheme.ExplicitEuler:
             # Для явной схемы Эйлера 1-го порядка значения на следующем временном уровне:
             # U^{i+1} = U^{i} - dt / dx * R
             self.logger.info('Start time iterating')
@@ -517,9 +448,9 @@ class SolverQuasi1D:
                     self.logger.info('Time step %s' % i)
                     self.data.cv_old = self.data.cv
 
-                    if self.time_stepping == 'Global':
+                    if self.time_stepping == TimeStepping.Global:
                         pass
-                    if self.time_stepping == 'Local':
+                    if self.time_stepping == TimeStepping.Local:
                         u = self.data.cv[1, :] / self.data.cv[0, :]
                         s_max = np.max(np.abs(u) + self.data.a)
                         self.data.dt = self.clf * self.mesh.dx / s_max

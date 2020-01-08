@@ -1,5 +1,5 @@
 import unittest
-from godunov import GodunovRiemannSolver, SolutionType
+from riemann_solvers.godunov import GodunovRiemannSolver
 from laval_nozzle import LavalNozzleSolver
 from solver import BoundCond, Quasi1DBlock, SolverQuasi1D, SubsonicInletRiemann, PressureOutletCharacteristic, \
     SolverData, PressureOutlet, SubsonicInlet, Transmissive
