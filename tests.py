@@ -6,28 +6,37 @@ from laval_nozzle import LavalNozzleSolver
 import solver
 from constant import *
 import numpy as np
+import cProfile
+import config
+import pstats
 
 
-log_dirname = 'log'
-plots_dirname = 'test_plots'
+def profile(solv: solver.SolverQuasi1D, fname: str, do_profile=True):
+    if do_profile:
+        profiler = cProfile.Profile()
+        profiler.runcall(solv.solve)
+        with open(os.path.join(config.prof_dirname, fname), 'wt') as f:
+            stats = pstats.Stats(profiler, stream=f)
+            stats.sort_stats('cumtime')
+            stats.print_stats()
+    else:
+        solv.solve()
+
+
+def make_dir_and_clear(dirname):
+    if not os.path.exists(dirname):
+        os.makedirs(dirname)
+
+    for name in os.listdir(dirname):
+        abs_name = os.path.join(dirname, name)
+        if os.path.isfile(abs_name):
+            os.remove(abs_name)
 
 
 def setup_module():
-    if not os.path.exists(log_dirname):
-        os.makedirs(log_dirname)
-
-    for name in os.listdir(log_dirname):
-        abs_name = os.path.join(log_dirname, name)
-        if os.path.isfile(abs_name):
-            os.remove(abs_name)
-
-    if not os.path.exists(plots_dirname):
-        os.makedirs(plots_dirname)
-
-    for name in os.listdir(plots_dirname):
-        abs_name = os.path.join(plots_dirname, name)
-        if os.path.isfile(abs_name):
-            os.remove(abs_name)
+    make_dir_and_clear(config.prof_dirname)
+    make_dir_and_clear(config.log_dirname)
+    make_dir_and_clear(config.plots_dirname)
 
 
 @pytest.mark.parametrize(
@@ -53,7 +62,6 @@ class TestRiemannProblem:
         self.num_pnt_exact = 500
         self.time_stepping = TimeStepping.Local
         self.time_scheme = TimeScheme.ExplicitEuler
-        self.log_level = 'info'
         self.fname_pref = 'riem_pr-'
 
         self.area = lambda x: 1
@@ -84,10 +92,11 @@ class TestRiemannProblem:
             mesh=self.mesh, k=self.k, R=self.R, T_ini=T_ini, u_ini=u_ini, p_ini=p_ini,
             space_scheme=space_scheme, time_scheme=self.time_scheme, time_stepping=self.time_stepping,
             ts_num=self.ts_num,
-            log_file=os.path.join(log_dirname, self.fname_pref + '%s-%s.log' % (fname_sub, name)), log_console=True,
-            log_level=self.log_level, cfl=self.cfl
+            log_file=os.path.join(config.log_dirname, self.fname_pref + '%s-%s.log' % (fname_sub, name)),
+            log_console=True,
+            log_level=config.log_level, cfl=self.cfl
         )
-        num_solver.solve()
+        profile(num_solver, fname=self.fname_pref + '%s.prof' % fname_sub, do_profile=config.do_profile)
 
         sol_time = num_solver.data.time
 
@@ -113,7 +122,7 @@ class TestRiemannProblem:
                 Variable.e: (x_exact, e_exact)
             },
             figsize=self.figsize, show=False,
-            fname=os.path.join(plots_dirname, self.fname_pref + '%s-%s' % (fname_sub, name)),
+            fname=os.path.join(config.plots_dirname, self.fname_pref + '%s-%s' % (fname_sub, name)),
             title=plot_title
         )
 
@@ -154,7 +163,6 @@ class TestLavalNozzle:
         self.num_dum = 1
         self.time_stepping = TimeStepping.Local
         self.time_scheme = TimeScheme.ExplicitEuler
-        self.log_level = 'info'
         self.fname_pref = 'lav-nozz-'
 
         self.inlet = solver.SubsonicInlet(p_stag=self.p1_stag, T_stag=self.T_stag)
@@ -186,10 +194,11 @@ class TestLavalNozzle:
             T_ini=T_ini, u_ini=u_ini, p_ini=p_ini,
             space_scheme=space_scheme, time_scheme=self.time_scheme,
             time_stepping=self.time_stepping, ts_num=self.ts_num,
-            log_file=os.path.join(log_dirname, self.fname_pref + '%s-%s.log' % (fname_sub, name)), log_console=True,
-            log_level=self.log_level, cfl=self.cfl
+            log_file=os.path.join(config.log_dirname, self.fname_pref + '%s-%s.log' % (fname_sub, name)),
+            log_console=True,
+            log_level=config.log_level, cfl=self.cfl
         )
-        num_solver.solve()
+        profile(num_solver, fname=self.fname_pref + '%s.prof' % fname_sub, do_profile=config.do_profile)
 
         exact_solver = LavalNozzleSolver(
             T_stag=self.T_stag, p1_stag=self.p1_stag, p2=p2, area=self.area, x1=self.x1, x2=self.x2, k=self.k,
@@ -206,7 +215,7 @@ class TestLavalNozzle:
                 Variable.p: (exact_solver.x_arr, exact_solver.p_arr),
             },
             figsize=self.figsize, show=False,
-            fname=os.path.join(plots_dirname, self.fname_pref + '%s-%s' % (fname_sub, name)),
+            fname=os.path.join(config.plots_dirname, self.fname_pref + '%s-%s' % (fname_sub, name)),
             title=plot_title, sol_markevery=4
         )
 
