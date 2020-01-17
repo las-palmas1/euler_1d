@@ -138,6 +138,12 @@ class TestRiemannProblem:
             plot_title='Steger-Warming', fname_sub='steg-warm'
         )
 
+    def test_hllc(self, rho_l, u_l, p_l, rho_r, u_r, p_r, x0_rel, name):
+        self.solve(
+            rho_l, u_l, p_l, rho_r, u_r, p_r, x0_rel, name=name, space_scheme=SpaceScheme.HLLC,
+            plot_title='HLLC', fname_sub='hllc'
+        )
+
 
 @pytest.mark.parametrize(
     argnames=['p2', 'name'],
@@ -224,6 +230,9 @@ class TestLavalNozzle:
 
     def test_steger_warming(self, p2, name):
         self.solve(p2, name, space_scheme=SpaceScheme.StegerWarming, plot_title='Steger-Warming', fname_sub='steg-warm')
+
+    def test_hllc(self, p2, name):
+        self.solve(p2, name, space_scheme=SpaceScheme.HLLC, plot_title='HLLC', fname_sub='hllc')
 
 
 

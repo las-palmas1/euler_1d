@@ -5,6 +5,7 @@ class SpaceScheme(Enum):
     Godunov = 0
     VanLeer = 1
     StegerWarming = 2
+    HLLC = 3
 
 
 class TimeScheme(Enum):

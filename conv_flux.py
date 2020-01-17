@@ -113,6 +113,80 @@ class Godunov(ConvectiveFlux):
         return f0, f1, f2
 
 
+class HLLC(ConvectiveFlux):
+
+    @classmethod
+    def compute(cls, ls: np.ndarray, rs: np.ndarray, k: float, dt: float) -> Tuple[float, float, float]:
+        a_l = (ls[2] * k / ls[0]) ** 0.5
+        a_r = (rs[2] * k / rs[0]) ** 0.5
+        rho_l = ls[0]
+        rho_r = rs[0]
+        u_l = ls[1]
+        u_r = rs[1]
+        p_l = ls[2]
+        p_r = rs[2]
+
+        rho_av = 0.5 * (rho_r + rho_l)
+        a_av = 0.5 * (a_r + a_l)
+        p_pvrs = 0.5 * (p_r + p_l) - 0.5 * (u_r + u_l) * rho_av * a_av
+        p_star = max(0, p_pvrs)
+
+        q_l = 1
+        if p_star > p_l:
+            q_l = (1 + (k + 1) / (2 * k) * (p_star / p_l - 1))**0.5
+
+        q_r = 1
+        if p_star > p_l:
+            q_r = (1 + (k + 1) / (2 * k) * (p_star / p_r - 1))**0.5
+
+        s_l = u_l - a_l * q_l
+        s_r = u_r + a_r * q_r
+
+        s_star = (p_r - p_l + rho_l * u_l * (s_l - u_l) - rho_r * u_r * (s_r - u_r)) / \
+                 (rho_l * (s_l - u_l) - rho_r * (s_r - u_r))
+
+        e_l = p_l / (rho_l * (k - 1))
+        e_r = p_r / (rho_r * (k - 1))
+
+        f_l0 = rho_l * u_l
+        f_l1 = rho_l * u_l**2 + p_l
+        f_l2 = (rho_l * (e_l + 0.5 * u_l**2) + p_l) * u_l
+
+        f_r0 = rho_r * u_r
+        f_r1 = rho_r * u_r**2 + p_r
+        f_r2 = (rho_r * (e_r + 0.5 * u_r**2) + p_r) * u_r
+
+        u_l0 = rho_l
+        u_l1 = rho_l * u_l
+        u_l2 = rho_l * (e_l + 0.5 * u_l**2)
+
+        u_r0 = rho_r
+        u_r1 = rho_r * u_r
+        u_r2 = rho_r * (e_r + 0.5 * u_r**2)
+
+        u_l0_star = rho_l * (s_l - u_l) / (s_l - s_star)
+        u_l1_star = u_l0_star * s_star
+        u_l2_star = u_l0_star * ((e_l + 0.5 * u_l**2) + (s_star - u_l) * (s_star + p_l / (rho_l * (s_l - u_l))))
+
+        u_r0_star = rho_r * (s_r - u_r) / (s_r - s_star)
+        u_r1_star = u_r0_star * s_star
+        u_r2_star = u_r0_star * ((e_r + 0.5 * u_r**2) + (s_star - u_r) * (s_star + p_r / (rho_r * (s_r - u_r))))
+
+        f_l0_star = f_l0 + s_l * (u_l0_star - u_l0)
+        f_l1_star = f_l1 + s_l * (u_l1_star - u_l1)
+        f_l2_star = f_l2 + s_l * (u_l2_star - u_l2)
+
+        f_r0_star = f_r0 + s_r * (u_r0_star - u_r0)
+        f_r1_star = f_r1 + s_r * (u_r1_star - u_r1)
+        f_r2_star = f_r2 + s_r * (u_r2_star - u_r2)
+
+        f0 = f_l0 * (0 <= s_l) + f_l0_star * (s_l < 0 <= s_star) + f_r0_star * (s_star < 0 <= s_r) + f_r0 * (s_r < 0)
+        f1 = f_l1 * (0 <= s_l) + f_l1_star * (s_l < 0 <= s_star) + f_r1_star * (s_star < 0 <= s_r) + f_r1 * (s_r < 0)
+        f2 = f_l2 * (0 <= s_l) + f_l2_star * (s_l < 0 <= s_star) + f_r2_star * (s_star < 0 <= s_r) + f_r2 * (s_r < 0)
+
+        return f0, f1, f2
+
+
 def get_conv_flux(space_scheme: SpaceScheme) -> ConvectiveFlux:
     if space_scheme == SpaceScheme.Godunov:
         return Godunov
@@ -120,4 +194,6 @@ def get_conv_flux(space_scheme: SpaceScheme) -> ConvectiveFlux:
         return StegerWarming
     elif space_scheme == SpaceScheme.VanLeer:
         return VanLeer
+    elif space_scheme == SpaceScheme.HLLC:
+        return HLLC
 
