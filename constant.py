@@ -6,6 +6,7 @@ class SpaceScheme(Enum):
     VanLeer = 1
     StegerWarming = 2
     HLLC = 3
+    Roe = 4
 
 
 class TimeScheme(Enum):

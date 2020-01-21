@@ -56,7 +56,7 @@ class TestRiemannProblem:
         self.x1 = 0
         self.x2 = 1
         self.cfl = 0.5
-        self.ts_num = 150
+        self.ts_num = 130
         self.num_real = 100
         self.num_dum = 1
         self.num_pnt_exact = 500
@@ -142,6 +142,12 @@ class TestRiemannProblem:
         self.solve(
             rho_l, u_l, p_l, rho_r, u_r, p_r, x0_rel, name=name, space_scheme=SpaceScheme.HLLC,
             plot_title='HLLC', fname_sub='hllc'
+        )
+
+    def test_roe(self, rho_l, u_l, p_l, rho_r, u_r, p_r, x0_rel, name):
+        self.solve(
+            rho_l, u_l, p_l, rho_r, u_r, p_r, x0_rel, name=name, space_scheme=SpaceScheme.Roe,
+            plot_title='Roe', fname_sub='roe'
         )
 
 
