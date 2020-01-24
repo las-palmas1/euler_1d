@@ -336,9 +336,9 @@ class RoeEntropyFix(ConvectiveFlux):
             lam_r2 = u_r + a_r
             if lam_l2 < 0 < lam_r2:
                 lam_2_av_new = lam_r2 * (lam_2_av - lam_l2) / (lam_r2 - lam_l2)
-                f0 = f_r0 + lam_2_av_new * alpha_2 * k02
-                f1 = f_r1 + lam_2_av_new * alpha_2 * k12
-                f2 = f_r2 + lam_2_av_new * alpha_2 * k22
+                f0 = f_r0 - lam_2_av_new * alpha_2 * k02
+                f1 = f_r1 - lam_2_av_new * alpha_2 * k12
+                f2 = f_r2 - lam_2_av_new * alpha_2 * k22
 
         return f0, f1, f2
 
