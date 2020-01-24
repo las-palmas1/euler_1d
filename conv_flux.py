@@ -252,6 +252,97 @@ class Roe(ConvectiveFlux):
         return f0, f1, f2
 
 
+class RoeEntropyFix(ConvectiveFlux):
+
+    @classmethod
+    def compute(cls, ls: np.ndarray, rs: np.ndarray, k: float, dt: float) -> Tuple[float, float, float]:
+        a_l = (ls[2] * k / ls[0]) ** 0.5
+        a_r = (rs[2] * k / rs[0]) ** 0.5
+        rho_l = ls[0]
+        rho_r = rs[0]
+        u_l = ls[1]
+        u_r = rs[1]
+        p_l = ls[2]
+        p_r = rs[2]
+
+        e_l = p_l / (rho_l * (k - 1))
+        e_r = p_r / (rho_r * (k - 1))
+        h_l = (e_l + 0.5 * u_l**2) + p_l / rho_l
+        h_r = (e_r + 0.5 * u_r**2) + p_r / rho_r
+
+        f_l0 = rho_l * u_l
+        f_l1 = rho_l * u_l**2 + p_l
+        f_l2 = (rho_l * (e_l + 0.5 * u_l**2) + p_l) * u_l
+
+        f_r0 = rho_r * u_r
+        f_r1 = rho_r * u_r**2 + p_r
+        f_r2 = (rho_r * (e_r + 0.5 * u_r**2) + p_r) * u_r
+
+        u_roe_av = (rho_l**0.5 * u_l + rho_r**0.5 * u_r) / (rho_l**0.5 + rho_r**0.5)
+        h_roe_av = (rho_l**0.5 * h_l + rho_r**0.5 * h_r) / (rho_l**0.5 + rho_r**0.5)
+        a_roe_av = ((k - 1) * (h_roe_av - 0.5 * u_roe_av**2))**0.5
+
+        lam_0_av = u_roe_av - a_roe_av
+        lam_1_av = u_roe_av
+        lam_2_av = u_roe_av + a_roe_av
+
+        k00 = 1
+        k10 = u_roe_av - a_roe_av
+        k20 = h_roe_av - u_roe_av * a_roe_av
+        k01 = 1
+        k11 = u_roe_av
+        k21 = 0.5 * u_roe_av**2
+        k02 = 1
+        k12 = u_roe_av + a_roe_av
+        k22 = h_roe_av + u_roe_av * a_roe_av
+
+        du0 = rho_r - rho_l
+        du1 = u_r * rho_r - u_l * rho_l
+        du2 = rho_r * (e_r + 0.5 * u_r**2) - rho_l * (e_l + 0.5 * u_l**2)
+
+        alpha_1 = (k - 1) / a_roe_av**2 * (du0 * (h_roe_av - u_roe_av**2) + u_roe_av * du1 - du2)
+        alpha_0 = 1 / (2 * a_roe_av) * (du0 * (u_roe_av + a_roe_av) - du1 - a_roe_av * alpha_1)
+        alpha_2 = du0 - (alpha_0 + alpha_1)
+
+        rho_av = 0.5 * (rho_l + rho_r)
+        a_av = 0.5 * (a_l + a_r)
+        p_star = 0.5 * (p_l + p_r) + 0.5 * (u_l - u_r) * (rho_av * a_av)
+        u_star = 0.5 * (u_l + u_r) + 0.5 * (p_l - p_r) / (rho_av * a_av)
+        rho_l_star = rho_l + (u_l - u_star) * rho_av / a_av
+        rho_r_star = rho_r + (u_star - u_r) * rho_av / a_av
+        a_l_star = (k * p_star / rho_l_star)**0.5
+        a_r_star = (k * p_star / rho_r_star)**0.5
+
+        f0 = 0.5 * (f_l0 + f_r0) - 0.5 * (
+                alpha_0 * abs(lam_0_av) * k00 + alpha_1 * abs(lam_1_av) * k01 + alpha_2 * abs(lam_2_av) * k02
+        )
+        f1 = 0.5 * (f_l1 + f_r1) - 0.5 * (
+                alpha_0 * abs(lam_0_av) * k10 + alpha_1 * abs(lam_1_av) * k11 + alpha_2 * abs(lam_2_av) * k12
+        )
+        f2 = 0.5 * (f_l2 + f_r2) - 0.5 * (
+                alpha_0 * abs(lam_0_av) * k20 + alpha_1 * abs(lam_1_av) * k21 + alpha_2 * abs(lam_2_av) * k22
+        )
+
+        if p_star <= p_l:
+            lam_l0 = u_l - a_l
+            lam_r0 = u_star - a_l_star
+            if lam_l0 < 0 < lam_r0:
+                lam_0_av_new = lam_l0 * (lam_r0 - lam_0_av) / (lam_r0 - lam_l0)
+                f0 = f_l0 + lam_0_av_new * alpha_0 * k00
+                f1 = f_l1 + lam_0_av_new * alpha_0 * k10
+                f2 = f_l2 + lam_0_av_new * alpha_0 * k20
+        if p_star <= p_r:
+            lam_l2 = u_star + a_r_star
+            lam_r2 = u_r + a_r
+            if lam_l2 < 0 < lam_r2:
+                lam_2_av_new = lam_r2 * (lam_2_av - lam_l2) / (lam_r2 - lam_l2)
+                f0 = f_r0 + lam_2_av_new * alpha_2 * k02
+                f1 = f_r1 + lam_2_av_new * alpha_2 * k12
+                f2 = f_r2 + lam_2_av_new * alpha_2 * k22
+
+        return f0, f1, f2
+
+
 def get_conv_flux(space_scheme: SpaceScheme) -> ConvectiveFlux:
     if space_scheme == SpaceScheme.Godunov:
         return Godunov
@@ -263,3 +354,5 @@ def get_conv_flux(space_scheme: SpaceScheme) -> ConvectiveFlux:
         return HLLC
     elif space_scheme == SpaceScheme.Roe:
         return Roe
+    elif space_scheme == SpaceScheme.RoeEntropyFix:
+        return RoeEntropyFix

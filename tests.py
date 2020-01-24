@@ -150,6 +150,12 @@ class TestRiemannProblem:
             plot_title='Roe', fname_sub='roe'
         )
 
+    def test_roe_entropy_fix(self, rho_l, u_l, p_l, rho_r, u_r, p_r, x0_rel, name):
+        self.solve(
+            rho_l, u_l, p_l, rho_r, u_r, p_r, x0_rel, name=name, space_scheme=SpaceScheme.RoeEntropyFix,
+            plot_title='Roe, Entropy Fix', fname_sub='roe-ent_fix'
+        )
+
 
 @pytest.mark.parametrize(
     argnames=['p2', 'name'],
@@ -239,6 +245,13 @@ class TestLavalNozzle:
 
     def test_hllc(self, p2, name):
         self.solve(p2, name, space_scheme=SpaceScheme.HLLC, plot_title='HLLC', fname_sub='hllc')
+
+    def test_roe(self, p2, name):
+        self.solve(p2, name, space_scheme=SpaceScheme.Roe, plot_title='Roe', fname_sub='roe')
+
+    def test_roe_entropy_fix(self, p2, name):
+        self.solve(p2, name, space_scheme=SpaceScheme.RoeEntropyFix, plot_title='Roe, Entropy Fix',
+                   fname_sub='roe-ent_fix')
 
 
 

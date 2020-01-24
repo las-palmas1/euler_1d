@@ -7,6 +7,7 @@ class SpaceScheme(Enum):
     StegerWarming = 2
     HLLC = 3
     Roe = 4
+    RoeEntropyFix = 5
 
 
 class TimeScheme(Enum):
